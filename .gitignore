@@ -1,0 +1,68 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# === LARGE FILES - EXCLUDE FROM GIT ===
+
+# Video files (too large)
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.wmv
+*.flv
+*.webm
+
+# Model files (too large)
+models/*.pth
+models/*.pt
+models/*.onnx
+models/*.trt
+fast-reid-config/*.pth
+fast-reid-conig/*.pt
+fast-reid-config/*.onnx
+fast-reid-config/*.trt
+*.weights
+yolo11*.pt
+yolov8*.pt
+
+# Dataset folders (too large)
+cctv_dataset/
+processed_dataset/
+quarter_dataset/
+trained_models/
+test_results/
+input_video.*
+output_*.mp4
+
+# YOLO training outputs (large)
+runs/
+wandb/
+
+# Logs and temporary files
+*.log
+tracking_log.txt
+activity_records.json
+temp/
+tmp/
+
+# Large cache files
+.ultralytics/
