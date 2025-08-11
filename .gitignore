@@ -30,6 +30,7 @@ Thumbs.db
 *.wmv
 *.flv
 *.webm
+*.csv
 
 # Model files (too large)
 models/*.pth

@@ -1,3 +1,4 @@
+import csv
 import sys
 import os
 import cv2
@@ -19,6 +20,7 @@ import torchvision.transforms as T
 input_video = "input_video.mp4"
 output_file = "output_bytetrack_reid.mp4"
 record_file = "activity_records.json"
+csv_file_name = "tracking.csv"
 tracking_log_file = "tracking_log.txt"
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -26,7 +28,7 @@ high_conf_thresh = 0.3
 low_conf_thresh = 0.2
 iou_thresh = 0.1
 reid_thresh = 0.87
-max_age = 600
+max_age = 30
 
 reid_config_path = r"fast-reid/configs/Market1501/bagtricks_R50.yml"
 reid_model_weights = r"models/market_bot_R50.pth"
@@ -59,11 +61,17 @@ def calc_iou(boxa, boxb):
 
 
 class TrackingLogger:
-    def __init__(self, log_file, video_start_time=None):
+    def __init__(self, log_file,csv_file, video_start_time=None):
         self.log_file = log_file
         self.video_start_time = video_start_time or datetime.now()
         self.track_events = {}
+        self.csv_file = csv_file
+        self.csv_track = {}
         
+        with open(self.csv_file, 'w',newline='') as csv_file:
+            csvwriter = csv.writer(csv_file)
+            csvwriter.writerow(['TimeStamp','ID','Entry','Exit'])
+
         with open(self.log_file, 'w') as f:
             f.write("=" * 80 + "\n")
             f.write("PERSON TRACKING LOG\n")
@@ -72,9 +80,65 @@ class TrackingLogger:
             f.write("Format: [TIMESTAMP] FRAME_NUM | ID_XXX | STATUS | DETAILS\n")
             f.write("-" * 80 + "\n\n")
     
+    def write_csv(self,track_id, entry_timestamp,exit_timestamp=None):
+        with open(self.csv_file, 'a', newline='') as csv_file:
+            csvwriter = csv.writer(csv_file)
+            csvwriter.writerow([
+                f"ID_{track_id:03d}",
+                entry_timestamp.strftime('%H:%M:%S.%f')[:-3],
+                exit_timestamp.strftime('%H:%M:%S.%f')[:-3] if exit_timestamp else "Active",
+                0 if exit_timestamp is None else (exit_timestamp - entry_timestamp).total_seconds()
+            ])
+
+    def update_on_exit(self,track_id, exit_timestamp,duration):
+        track_id_str = f"ID_{track_id:03d}"
+        with open(self.csv_file, 'r+', newline='') as f:
+            lines = f.readlines()
+            f.seek(0) 
+            updated = False
+        
+            for i, line in enumerate(lines):
+                if track_id_str in line and "Active" in line:
+               
+                    parts = line.strip().split(',')
+                    if len(parts) >= 4:
+              
+                        parts[2] = exit_timestamp.strftime('%H:%M:%S.%f')[:-3]
+                        parts[3] = f"{duration:.1f}"
+                        lines[i] = ','.join(parts) + '\n'
+                        updated = True
+                        break
+            if updated:
+                f.writelines(lines)
+                f.truncate()
+
+       
+
     def log_event(self, frame_num, frame_time, track_id, status, details="", box=None):
         timestamp = self.video_start_time + timedelta(seconds=frame_time)
+
+        if status == "New":
+            self.csv_track[track_id] = {
+                'entry_time': timestamp,
+                'exit_time': None,
+                'active': True
+            }
+            self.write_csv(track_id,timestamp)
         
+        elif status == "Removed":
+            if track_id in self.csv_track and self.csv_track[track_id]['active']:
+                self.csv_track[track_id]['exit_time'] = timestamp
+                self.csv_track[track_id]['active'] = False
+                
+                # Calculate duration
+                entry_time = self.csv_track[track_id]['entry_time']
+                duration = (timestamp - entry_time).total_seconds()
+                
+                # Update CSV with exit info
+                self.update_on_exit(track_id, timestamp, duration)
+
+            
+
         box_str = ""
         if box is not None:
             x1, y1, x2, y2 = map(int, box)
@@ -99,6 +163,18 @@ class TrackingLogger:
         track_data['total_frames'] += 1
         track_data['events'].append((frame_num, status, details))
         track_data['status_counts'][status] = track_data['status_counts'].get(status, 0) + 1
+
+    def finalize_active_tracks(self, final_frame_time):
+        """Mark any still-active tracks as exited at video end"""
+        final_timestamp = self.video_start_time + timedelta(seconds=final_frame_time)
+        
+        for track_id, track_info in self.csv_track.items():
+            if track_info['active']:
+                duration = (final_timestamp - track_info['entry_time']).total_seconds()
+                self.update_on_exit(track_id, final_timestamp, duration)
+                
+                with open(self.log_file, 'a') as f:
+                    f.write(f"[{final_timestamp.strftime('%H:%M:%S.%f')[:-3]}] END_VIDEO | ID_{track_id:03d} | Exited       | End of video\n")
     
     def write_summary(self, total_frames, fps):
         with open(self.log_file, 'a') as f:
@@ -348,7 +424,7 @@ def main():
     reid_predictor = setup_fastreid_predictor(reid_config_path, reid_model_weights, device)
 
     video_start_time = datetime.now()
-    logger = TrackingLogger(tracking_log_file, video_start_time)
+    logger = TrackingLogger(tracking_log_file,csv_file_name, video_start_time)
 
     tracker = MyTracker(
         reid_predictor=reid_predictor,
@@ -475,7 +551,8 @@ def main():
         
         elapsed_time = time.time() - start_time
         avg_fps = frame_count / elapsed_time if elapsed_time > 0 else 0
-        
+        final_frame_time = frame_count / fps
+        logger.finalize_active_tracks(final_frame_time)
         logger.write_summary(frame_count, fps)
         
         print(f"\n✅ Tracking completed!")
