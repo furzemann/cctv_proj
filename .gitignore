@@ -43,7 +43,7 @@ fast-reid-config/*.onnx
 fast-reid-config/*.trt
 *.weights
 yolo11*.pt
-yolo10*.pt
+yolov10*.pt
 yolov8*.pt
 
 # Dataset folders (too large)
